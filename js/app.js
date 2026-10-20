@@ -128,7 +128,7 @@ function renderHome() {
     <section class="hero panel">
       <p class="hud">Mission log</p>
       <h1>Spell words.<br>Scan sea creatures.</h1>
-      <p class="hero-sub">Every word you spell from memory scans a creature for your PDA.</p>
+      <p class="hero-sub">📖 <b>Learn</b> the words, then 🎯 <b>Scan dive</b>: spell them from memory to scan creatures for your PDA.</p>
       <div class="meter" role="img" aria-label="${learned} of ${total} words learned">
         <div class="meter-fill" style="width:${(100 * learned) / total}%"></div>
       </div>
@@ -201,12 +201,13 @@ function renderDive() {
   const w = d.word;
   const info = WORDS[w];
   const isTest = d.mode === 'test';
+  const isLearn = d.mode === 'learn';
   const m = d.mission;
 
   const title = isTest
     ? `<small>Practice</small>Bee Test`
-    : `<small>Mission ${missionIndexOf(m) + 1}</small>${m.name}`;
-  const counter = isTest ? `<div class="counter">${d.done + 1}/${d.total}</div>` : '';
+    : `<small>${isLearn ? '📖 Learn' : '🎯 Scan dive'} · Mission ${missionIndexOf(m) + 1}</small>${m.name}`;
+  const counter = isLearn ? '' : `<div class="counter">${Math.min(d.done + 1, d.total)}/${d.total}</div>`;
 
   const scan = isTest
     ? ''
@@ -216,7 +217,9 @@ function renderDive() {
         const pct = has ? 100 : missionPct(m);
         const label = has
           ? `${CREATURES[id].name} · in your PDA`
-          : m.boss
+          : isLearn
+            ? 'Practice · scans in Scan dive'
+            : m.boss
             ? '⚠ Leviathan signal'
             : `Scanning: ${pct >= 40 ? CREATURES[id].name : '???'}`;
         return `
@@ -252,7 +255,7 @@ function renderDive() {
     tools = `
       <button class="tool" data-act="say-word">🔊<span>Word</span></button>
       <button class="tool" data-act="say-sentence">💬<span>Sentence</span></button>
-      ${!isTest && !d.hinted ? '<button class="tool" data-act="hint">💡<span>Hint</span></button>' : ''}
+      ${isLearn && !d.hinted ? '<button class="tool" data-act="hint">💡<span>Hint</span></button>' : ''}
       ${d.audioUrl ? '<button class="tool" data-act="play-voice">▶<span>My voice</span></button>' : ''}`;
     const mic =
       canListen && !state.micBlocked
@@ -285,7 +288,7 @@ function renderDive() {
       <button class="tool" data-act="say-word">🔊<span>Word</span></button>
       <button class="tool" data-act="say-letters">🔤<span>Letters</span></button>
       ${d.audioUrl ? '<button class="tool" data-act="play-voice">▶<span>My voice</span></button>' : ''}`;
-    main = `<button class="btn primary big" data-act="next">${isTest ? 'Next ▶' : 'Got it ▶'}</button>`;
+    main = `<button class="btn primary big" data-act="next">${isLearn ? 'Got it ▶' : 'Next ▶'}</button>`;
   }
 
   app.innerHTML = `
@@ -306,7 +309,7 @@ function renderPda() {
     const c = CREATURES[id];
     const has = store.hasCreature(id);
     const mi = MISSIONS.findIndex((m) => m.creature === id);
-    const hint = id === BONUS_CREATURE ? 'Spell your first word' : `Mission ${mi + 1}`;
+    const hint = id === BONUS_CREATURE ? 'Scan your first word' : `Mission ${mi + 1}`;
     return `
       <button class="pda-card${has ? '' : ' locked'}${c.leviathan ? ' lev' : ''}" data-act="creature" data-id="${id}" ${has ? '' : 'disabled'} style="--c:${c.color}">
         <div class="pda-art">${creatureSvg(id, c.color, { locked: !has })}</div>
@@ -495,14 +498,22 @@ function newDive(extra) {
   };
 }
 
-function startDive(missionId) {
+/**
+ * mode 'learn': see, hear, then spell; practice only, no scans.
+ * mode 'scan': hear the word and spell it from memory; only here words are scanned and creatures unlocked.
+ * words: optional subset (for example the words missed in the last scan dive).
+ */
+function startDive(missionId, mode = 'scan', words = null) {
   const m = MISSIONS.find((x) => x.id === missionId);
   if (!m) return;
   const practice = m.words.every((w) => store.isMastered(w));
-  const queue = practice ? shuffle([...m.words]) : m.words.filter((w) => !store.isMastered(w));
-  state.dive = newDive({ mode: 'dive', mission: m, queue, practice });
+  let queue;
+  if (words?.length) queue = [...words];
+  else if (mode === 'learn' || practice) queue = shuffle([...m.words]);
+  else queue = shuffle(m.words.filter((w) => !store.isMastered(w)));
+  state.dive = newDive({ mode, mission: m, queue, practice, total: queue.length, done: 0, missed: [] });
   state.screen = 'dive';
-  if (m.boss && !practice) {
+  if (mode === 'scan' && m.boss && !practice) {
     showBossIntro();
     return;
   }
@@ -550,7 +561,8 @@ function nextWord() {
   }
   d.word = d.queue.shift();
   resetWordState(d);
-  if (d.mode === 'test') {
+  if (d.mode !== 'learn') {
+    // From memory: he only hears the word, like at the real spelling bee.
     d.phase = 'spell';
     render();
     window.scrollTo(0, 0);
@@ -610,7 +622,8 @@ function check() {
   if (d.phase !== 'spell' || d.typed.length < d.word.length) return;
   d.mic?.stop();
   const ok = d.typed.join('') === d.word;
-  const firstEver = store.recordAnswer(d.word, ok, { voice: d.voiceUsed });
+  // Only a word spelled from memory in a scan dive counts as learned.
+  const firstEver = store.recordAnswer(d.word, ok, { voice: d.voiceUsed, fromMemory: d.mode === 'scan' });
   sync.send({
     type: 'answer',
     word: d.word,
@@ -621,17 +634,18 @@ function check() {
   });
 
   if (d.mode === 'test') {
-    d.done++;
     if (ok) d.correct++;
     else d.wrong.push(d.word);
   }
+  if (d.mode !== 'learn') d.done++;
+  if (d.mode === 'scan' && !ok) d.missed.push(d.word);
 
   if (ok) {
     d.phase = 'ok';
-    d.praise = pick(PRAISE);
+    d.praise = d.mode === 'scan' && !d.practice ? `Scanned! ${pick(PRAISE)}` : pick(PRAISE);
     render();
     sfx.correct();
-    if (d.mode === 'dive' && !d.practice) {
+    if (d.mode === 'scan' && !d.practice) {
       // Show the new scan percentage with a little sweep.
       sfx.scan();
     }
@@ -646,7 +660,8 @@ function check() {
     })();
   } else {
     d.phase = 'bad';
-    if (d.mode === 'dive') d.queue.push(d.word); // it comes back later in this dive
+    // Learning: the word comes back later. Scan dive: it stays unscanned until the next dive.
+    if (d.mode === 'learn') d.queue.push(d.word);
     render();
     sfx.wrong();
     (async () => {
@@ -749,19 +764,50 @@ function finishDive() {
     return;
   }
   const m = d.mission;
-  if (m.words.every((w) => store.isMastered(w)) && store.unlockCreature(m.creature)) {
+  const allScanned = m.words.every((w) => store.isMastered(w));
+  const home = { label: 'Back to map', act: 'overlay-home' };
+
+  if (d.mode === 'scan' && allScanned && store.unlockCreature(m.creature)) {
     sync.send({ type: 'creature', word: CREATURES[m.creature].name, mission: m.name });
     showCreatureReward(m.creature, { after: () => go('home') });
     return;
   }
-  showMessage({
-    hud: 'Dive complete',
-    title: `${m.name} ✓`,
-    text: 'Great practice! Come back any time to keep these words fresh.',
-    button: 'Back to map ▶',
-    after: () => go('home'),
+
+  if (d.mode === 'learn') {
+    showChoice({
+      hud: 'Practice complete',
+      title: `📖 ${m.name}`,
+      text: allScanned
+        ? 'Great practice! These words are already scanned.'
+        : 'Great practice! Now dive and spell the words from memory to scan the creature.',
+      buttons: allScanned
+        ? [{ ...home, cls: 'primary' }]
+        : [{ label: m.boss ? '🎯 Face the Leviathan' : '🎯 Scan dive', act: 'start-mode', mode: 'scan', id: m.id, cls: 'primary' }, home],
+    });
+    speak(allScanned ? 'Practice complete. Great job!' : 'Practice complete. Now dive and scan!');
+    return;
+  }
+
+  const right = d.total - d.missed.length;
+  if (d.practice || !d.missed.length) {
+    showChoice({
+      hud: 'Dive complete',
+      title: `🎯 ${right} / ${d.total}`,
+      text: d.missed.length ? `Practice these words: <b>${d.missed.map(esc).join(', ')}</b>` : 'All correct from memory. Strong diver!',
+      buttons: [{ ...home, cls: 'primary' }],
+    });
+    speak(d.missed.length ? `You spelled ${right} out of ${d.total}.` : 'All correct! Great memory!');
+    return;
+  }
+
+  const left = m.words.filter((w) => !store.isMastered(w));
+  showChoice({
+    hud: 'Scan incomplete',
+    title: `Scanned ${right} of ${d.total}`,
+    text: `Learn these words, then dive again: <b>${left.map(esc).join(', ')}</b>`,
+    buttons: [{ label: '📖 Learn these words', act: 'start-mode', mode: 'learn', id: m.id, words: left, cls: 'primary' }, home],
   });
-  speak('Dive complete. Great practice!');
+  speak(`You scanned ${right} of ${d.total} words. Learn the others and dive again!`);
 }
 
 function finishTest() {
@@ -791,11 +837,77 @@ function openOverlay(html, after) {
 }
 
 function closeOverlay() {
+  const after = state.afterOverlay;
+  hideOverlay();
+  after?.();
+}
+
+function hideOverlay() {
   overlay.hidden = true;
   overlay.innerHTML = '';
-  const after = state.afterOverlay;
   state.afterOverlay = null;
-  after?.();
+}
+
+/** A panel with any number of buttons; each button names its own action. */
+function showChoice({ hud, title, text = '', art = '', buttons, cls = '' }) {
+  const btn = (b) =>
+    b.html ||
+    `<button class="btn ${b.cls || 'ghost'} big" data-act="${b.act}"${b.id ? ` data-id="${b.id}"` : ''}${
+      b.mode ? ` data-mode="${b.mode}"` : ''
+    }${b.words ? ` data-words="${b.words.join(',')}"` : ''}>${b.label}</button>`;
+  openOverlay(
+    `<div class="reward panel ${cls}">
+      <p class="hud">${hud}</p>
+      ${art}
+      <h2>${title}</h2>
+      ${text ? `<p class="fact">${text}</p>` : ''}
+      <div class="choice-btns">${buttons.map(btn).join('')}</div>
+    </div>`,
+  );
+}
+
+function modeButton(mode, m, icon, title, sub, primary) {
+  return `
+    <button class="mode-btn${primary ? ' primary' : ''}" data-act="start-mode" data-mode="${mode}" data-id="${m.id}">
+      <span class="mode-icon">${icon}</span>
+      <span class="mode-text"><b>${title}</b><small>${sub}</small></span>
+    </button>`;
+}
+
+/** Tapping a mission on the map: pick Learn (practice) or Scan dive (from memory, earns the creature). */
+function showMissionChooser(id) {
+  const m = MISSIONS.find((x) => x.id === id);
+  if (!m) return;
+  const c = CREATURES[m.creature];
+  const has = store.hasCreature(m.creature);
+  const scanned = m.words.filter((w) => store.isMastered(w)).length;
+  const done = scanned === m.words.length;
+  const status = done
+    ? `${has ? c.name : 'Creature'} scanned ✓`
+    : m.boss
+      ? '⚠ Leviathan signal. One very long word.'
+      : `Scanned ${scanned} of ${m.words.length} words`;
+  showChoice({
+    hud: `Mission ${missionIndexOf(m) + 1}`,
+    title: `${m.icon} ${m.name}`,
+    text: status,
+    art: `<div class="chooser-art">${scanRevealHtml(m.creature, has ? 100 : missionPct(m))}</div>`,
+    cls: m.boss && !done ? 'alert' : '',
+    buttons: [
+      { html: modeButton('learn', m, '📖', 'Learn', 'See and hear the words. Practice, no scans.', false) },
+      {
+        html: modeButton(
+          'scan',
+          m,
+          '🎯',
+          m.boss && !done ? 'Face the Leviathan' : 'Scan dive',
+          done ? 'Spell from memory again. Already scanned.' : 'Hear a word, spell it from memory. Only here you scan!',
+          !done,
+        ),
+      },
+      { label: 'Close', act: 'overlay-close', cls: 'ghost' },
+    ],
+  });
 }
 
 function showMessage({ hud, title, text, button, after }) {
@@ -890,7 +1002,21 @@ document.addEventListener('click', (e) => {
 
   switch (act) {
     case 'dive':
-      startDive(el.dataset.id);
+      showMissionChooser(el.dataset.id);
+      break;
+    case 'start-mode': {
+      const { id, mode, words } = el.dataset;
+      hideOverlay();
+      startDive(id, mode, words ? words.split(',') : null);
+      break;
+    }
+    case 'overlay-close':
+      stopSpeaking();
+      hideOverlay();
+      break;
+    case 'overlay-home':
+      hideOverlay();
+      go('home');
       break;
     case 'test':
       startTest();

@@ -85,7 +85,8 @@ function buildSummary(ss) {
   s.getRange('A2').setValue('Обновляется сама после каждого ответа. Все события — на листе Log.').setFontColor('#666666');
 
   const rows = [
-    ['Выучено слов (из 40)', '=IFERROR(COUNTUNIQUE(FILTER(Log!D2:D, Log!C2:C="answer", Log!E2:E=TRUE, Log!G2:G="dive")), 0)'],
+    // "Learned" = spelled right from memory; answers in Learn mode (word shown first) do not count.
+    ['Выучено слов (из 40)', '=IFERROR(COUNTUNIQUE(FILTER(Log!D2:D, Log!C2:C="answer", Log!E2:E=TRUE, Log!G2:G<>"learn")), 0)'],
     ['Существ открыто (из 10)', '=IFERROR(COUNTUNIQUE(FILTER(Log!D2:D, Log!C2:C="creature")), 0)'],
     ['Последнее занятие', '=IFERROR(TEXT(MAX(FILTER(Log!A2:A, Log!C2:C="answer")), "d mmm, hh:mm"), "—")'],
     ['Минут сегодня', '=IFERROR(MAX(FILTER(Log!I2:I, Log!B2:B=' + today + ')), 0)'],
@@ -107,7 +108,7 @@ function buildSummary(ss) {
     [45, 'Bee Test (пробный экзамен)',
       '=IFERROR(QUERY(Log!A2:K, "select B, J where C = \'test\' order by A desc limit 10 label B \'День\', J \'Результат\'", 0), "ещё не проходил")'],
     [59, 'Выученные слова',
-      '=IFERROR(QUERY(Log!A2:K, "select D, min(B) where C = \'answer\' and E = true and G = \'dive\' group by D order by min(B) label D \'Слово\', min(B) \'Когда\'", 0), "пока нет")'],
+      '=IFERROR(QUERY(Log!A2:K, "select D, min(B) where C = \'answer\' and E = true and G <> \'learn\' group by D order by min(B) label D \'Слово\', min(B) \'Когда\'", 0), "пока нет")'],
   ];
   blocks.forEach((b) => {
     s.getRange(b[0], 1).setValue(b[1]).setFontWeight('bold').setFontSize(12);

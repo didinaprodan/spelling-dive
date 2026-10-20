@@ -3,6 +3,8 @@
 A spelling bee practice game for a first grader, themed after an underwater survival game.
 Spell a word from memory to "scan" a sea creature into your PDA. The last word unlocks a leviathan.
 
+- Two modes per mission: **Learn** (see the word, hear it letter by letter, then spell it; practice only) and
+  **Scan dive** (hear the word, spell it from memory; only correct answers here scan creatures).
 - Hear each word, its letters, and a sentence (built-in iPhone voice).
 - Spell by tapping letters or by saying them out loud (Safari speech recognition).
 - Parent screen (hold the button on the map): days and minutes practiced, learned words, hardest words, Bee Test results.

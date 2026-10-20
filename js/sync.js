@@ -93,11 +93,11 @@ export const sync = {
     const s = store.get();
     const events = [];
     for (const [word, at] of Object.entries(s.mastered)) {
-      events.push({ type: 'answer', word, ok: true, mode: 'dive', at, detail: 'history' });
+      events.push({ type: 'answer', word, ok: true, mode: 'scan', at, detail: 'history' });
     }
     for (const [word, st] of Object.entries(s.stats)) {
       for (let i = 0; i < (st.bad || 0); i++) {
-        events.push({ type: 'answer', word, ok: false, mode: 'dive', at: st.last || Date.now(), detail: 'history' });
+        events.push({ type: 'answer', word, ok: false, mode: 'scan', at: st.last || Date.now(), detail: 'history' });
       }
     }
     for (const [id, at] of Object.entries(s.creatures)) {
