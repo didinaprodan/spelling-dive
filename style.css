@@ -564,6 +564,19 @@ body.shake .overlay-inner { animation: shake 0.45s ease-in-out 3; }
 .toggle.on { background: rgba(79, 227, 255, 0.4); }
 .toggle.on::after { transform: translateX(20px); background: var(--cyan); }
 
+input.url {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font: 600 14px var(--f-ui);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.settings a { color: var(--cyan); }
+
 /* ---------- small phones ---------- */
 
 @media (max-width: 360px) {

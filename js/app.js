@@ -4,6 +4,7 @@ import { store, dayKey } from './store.js';
 import { speak, spellAloud, sayLetter, stopSpeaking, listen, canListen, setRate } from './speech.js';
 import { lettersFromTranscript } from './letters.js';
 import { sfx, unlockAudio } from './sfx.js';
+import { sync } from './sync.js';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -66,6 +67,7 @@ function stopAll() {
 
 function go(screen) {
   stopAll();
+  if (state.screen === 'dive' && screen !== 'dive') sync.send({ type: 'day' });
   state.screen = screen;
   render();
   window.scrollTo(0, 0);
@@ -345,6 +347,15 @@ function fmtDate(ms) {
   return new Date(ms).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 }
 
+function syncStatus() {
+  if (!sync.url()) return 'Не подключено.';
+  const last = sync.lastSent();
+  const when = last
+    ? new Date(last).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : 'ещё не было';
+  return `Подключено. Последняя отправка: ${when}. Ждут отправки: ${sync.pending()}.`;
+}
+
 function renderParent() {
   const s = store.get();
   const today = new Date();
@@ -425,6 +436,18 @@ function renderParent() {
         <thead><tr><th>Слово</th><th>Выучено</th><th>Ошибок</th><th>Голосом</th></tr></thead>
         <tbody>${wordRows}</tbody>
       </table>
+    </section>
+
+    <section class="panel settings">
+      <h3>Статистика на вашем телефоне</h3>
+      <p class="muted">Ответы, время занятий и трофеи сами уходят в вашу Google-таблицу. <a href="https://github.com/didinaprodan/spelling-dive/blob/main/sheets/README.md" target="_blank" rel="noopener">Как настроить</a></p>
+      <input class="url" id="sync-url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+        placeholder="https://script.google.com/macros/s/…/exec" value="${esc(sync.url())}">
+      <div class="row-btns">
+        <button class="btn primary small" data-act="save-sync">Сохранить</button>
+        <button class="btn ghost small" data-act="ping-sync" ${sync.url() ? '' : 'disabled'}>Проверить связь</button>
+      </div>
+      <p class="muted">${syncStatus()}</p>
     </section>
 
     <section class="panel settings">
@@ -588,6 +611,14 @@ function check() {
   d.mic?.stop();
   const ok = d.typed.join('') === d.word;
   const firstEver = store.recordAnswer(d.word, ok, { voice: d.voiceUsed });
+  sync.send({
+    type: 'answer',
+    word: d.word,
+    ok,
+    voice: d.voiceUsed,
+    mode: d.mode,
+    mission: d.mode === 'test' ? 'Bee Test' : d.mission.name,
+  });
 
   if (d.mode === 'test') {
     d.done++;
@@ -605,7 +636,10 @@ function check() {
       sfx.scan();
     }
     // The welcome bonus opens when he taps Next, so it never talks over a new word.
-    if (firstEver && store.unlockCreature(BONUS_CREATURE)) d.pendingBonus = true;
+    if (firstEver && store.unlockCreature(BONUS_CREATURE)) {
+      d.pendingBonus = true;
+      sync.send({ type: 'creature', word: CREATURES[BONUS_CREATURE].name });
+    }
     (async () => {
       const finished = await spellAloud(d.word, (i) => lightLetter(i, '#boxes .box'), { sayWord: false });
       if (finished && state.dive === d && d.phase === 'ok') await speak(d.praise);
@@ -716,6 +750,7 @@ function finishDive() {
   }
   const m = d.mission;
   if (m.words.every((w) => store.isMastered(w)) && store.unlockCreature(m.creature)) {
+    sync.send({ type: 'creature', word: CREATURES[m.creature].name, mission: m.name });
     showCreatureReward(m.creature, { after: () => go('home') });
     return;
   }
@@ -732,6 +767,7 @@ function finishDive() {
 function finishTest() {
   const d = state.dive;
   store.addTest({ score: d.correct, total: d.total, wrong: d.wrong });
+  sync.send({ type: 'test', detail: `${d.correct}/${d.total}${d.wrong.length ? ' · ' + d.wrong.join(', ') : ''}` });
   const perfect = d.correct === d.total;
   showMessage({
     hud: 'Bee Test result',
@@ -936,6 +972,21 @@ document.addEventListener('click', (e) => {
       render();
       break;
     }
+    case 'save-sync': {
+      const url = document.getElementById('sync-url').value.trim();
+      if (url && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) {
+        alert('Это не похоже на адрес веб-приложения. Он начинается с https://script.google.com/macros/s/ и заканчивается на /exec');
+        break;
+      }
+      sync.connect(url);
+      render();
+      setTimeout(() => state.screen === 'parent' && render(), 3000);
+      break;
+    }
+    case 'ping-sync':
+      sync.send({ type: 'ping', detail: 'test' });
+      setTimeout(() => state.screen === 'parent' && render(), 3000);
+      break;
     case 'test-voice':
       spellAloud('chair');
       break;
@@ -974,6 +1025,9 @@ document.addEventListener('pointerdown', (e) => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) stopAll();
 });
+
+// Send anything practiced while offline.
+sync.flush();
 
 // Ask the browser to keep progress safe from storage cleanup.
 navigator.storage?.persist?.().catch(() => {});
